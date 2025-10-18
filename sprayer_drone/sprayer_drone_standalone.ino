@@ -36,6 +36,7 @@
 
 // === Wi-Fi Settings ===
 const char* ssid = "ESP32S3-Drone";
+const char* ssid_backup = "DroneController";  // Backup SSID
 const char* password = "12345678";
 
 // === MAVLink & Drone Settings ===
@@ -63,6 +64,7 @@ int16_t ch4_yaw = 1500;
 unsigned long lastHeartbeat = 0;
 unsigned long lastOverride = 0;
 unsigned long lastRCRequest = 0;
+unsigned long lastWiFiCheck = 0;
 
 // === MAVLink Packet Structure ===
 typedef struct {
@@ -200,6 +202,20 @@ void mavlink_msg_command_long_pack(mavlink_message_t* msg, uint8_t system_id, ui
   msg->payload[32] = confirmation;
   
   mavlink_finalize_message(msg, system_id, component_id, 33);
+}
+
+// === WiFi Functions ===
+void checkWiFiStatus() {
+  if (WiFi.getMode() != WIFI_AP) {
+    Serial.println("⚠ WiFi mode changed! Restarting AP...");
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(ssid, password, 1, 0, 4);
+  }
+  
+  Serial.print("WiFi Status - Connected Clients: ");
+  Serial.print(WiFi.softAPgetStationNum());
+  Serial.print(" | AP IP: ");
+  Serial.println(WiFi.softAPIP());
 }
 
 // === MAVLink Functions ===
@@ -387,17 +403,53 @@ void setup() {
   SERIAL_PORT.begin(57600, SERIAL_8N1, 16, 17); // RX=16, TX=17
 
   // Start Wi-Fi in AP Mode
-  WiFi.softAP(ssid, password);
-  WiFi.setTxPower(WIFI_POWER_8_5dBm);
-  WiFi.setSleep(true);
-
-  Serial.println("WiFi AP Started");
-  Serial.print("SSID: "); Serial.println(ssid);
-  Serial.print("IP: "); Serial.println(WiFi.softAPIP());
+  Serial.println("Starting WiFi Access Point...");
+  
+  // Configure WiFi for maximum compatibility and visibility
+  WiFi.mode(WIFI_AP);
+  WiFi.setTxPower(WIFI_POWER_19_5dBm); // Maximum power for better range
+  WiFi.setSleep(false); // Keep WiFi active at all times
+  
+  // Start AP with explicit configuration
+  bool apStarted = WiFi.softAP(ssid, password, 1, 0, 4); // Channel 1, not hidden, max 4 clients
+  
+  if (apStarted) {
+    Serial.println("✓ WiFi AP Started Successfully!");
+    Serial.print("SSID: "); Serial.println(ssid);
+    Serial.print("Password: "); Serial.println(password);
+    Serial.print("IP Address: "); Serial.println(WiFi.softAPIP());
+    Serial.print("MAC Address: "); Serial.println(WiFi.softAPmacAddress());
+    Serial.print("Channel: 1");
+    Serial.println("\n--- Connect your device to this network ---");
+  } else {
+    Serial.println("✗ Failed to start WiFi AP!");
+    Serial.println("Trying backup SSID...");
+    delay(1000);
+    // Retry with backup SSID
+    bool backupStarted = WiFi.softAP(ssid_backup, password, 6, 0, 4); // Try channel 6
+    if (backupStarted) {
+      Serial.println("✓ Backup WiFi AP Started!");
+      Serial.print("SSID: "); Serial.println(ssid_backup);
+      Serial.print("Password: "); Serial.println(password);
+      Serial.print("IP: "); Serial.println(WiFi.softAPIP());
+    } else {
+      Serial.println("✗ Both WiFi attempts failed!");
+      Serial.println("Check ESP32 S3 WiFi capability...");
+    }
+  }
 
   setupRoutes();
   server.begin();
-  Serial.println("Web Server Running...");
+  Serial.println("✓ Web Server Running!");
+  
+  // Test WiFi AP immediately
+  Serial.println("\n=== WiFi AP Test ===");
+  delay(1000);
+  checkWiFiStatus();
+  Serial.println("Look for 'ESP32S3-Drone' or 'DroneController' in your WiFi list!");
+  Serial.println("Connect with password: 12345678");
+  Serial.println("Then open: http://192.168.4.1");
+  Serial.println("======================\n");
   
   // Wait for telemetry connection to stabilize
   delay(2000);
@@ -415,6 +467,12 @@ void loop() {
   server.handleClient();
 
   unsigned long now = millis();
+
+  // Check WiFi status every 30 seconds
+  if (now - lastWiFiCheck >= 30000) {
+    checkWiFiStatus();
+    lastWiFiCheck = now;
+  }
 
   // Heartbeat every 1 second
   if (now - lastHeartbeat >= 1000) {
