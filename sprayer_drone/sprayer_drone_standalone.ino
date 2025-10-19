@@ -280,8 +280,19 @@ void sendCommand(uint16_t cmd, float p1 = 0, float p2 = 0, float p3 = 0,
 
 // === HTTP Handlers ===
 void armDrone() {
-  sendCommand(MAV_CMD_COMPONENT_ARM_DISARM, 1);
-  server.send(200, "text/plain", "Drone Armed");
+  // Ensure throttle is at minimum for safe arming
+  throttle = 1000;
+  ch3_throttle = 1000;
+  
+  // Send RC override with safe values first
+  sendRCOverride(1500, 1500, 1000, 1500);
+  delay(100);
+  
+  // Send ARM command with force flag for APM 2.8
+  sendCommand(MAV_CMD_COMPONENT_ARM_DISARM, 1, 21196); // Magic number for force arm
+  
+  Serial.println("ARM Command Sent - Throttle at minimum");
+  server.send(200, "text/plain", "Drone Armed - Check Mission Planner");
 }
 
 void disarmDrone() {
